@@ -1,49 +1,68 @@
+
 import gradio as gr
 import cv2
-import tempfile
-from moviepy.editor import VideoFileClip
+import numpy as np
 import os
+import tempfile
+import ffmpeg
 
-def blur_faces_in_video(video_path):
+# Function to compress the video
+def compress_video(input_file):
+    # Temporary file to save the compressed video
+    temp_output = tempfile.NamedTemporaryFile(delete=False, suffix='.mp4')
+    temp_output.close()
+
+    # Compress the video using FFmpeg
+    ffmpeg.input(input_file).output(temp_output.name, vcodec='libx264', crf=28).run()
+
+    return temp_output.name
+
+# Function to detect and blur faces
+def blur_faces(input_video):
+    # Step 1: Compress the video
+    compressed_video = compress_video(input_video.name)
+
+    # Step 2: Load the video and face detection model
+    video = cv2.VideoCapture(compressed_video)
     face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
     
-    # Temp paths
-    temp_input = tempfile.NamedTemporaryFile(delete=False, suffix=".mp4").name
-    temp_output = tempfile.NamedTemporaryFile(delete=False, suffix=".mp4").name
+    # Output directory for the video frames
+    output_file = tempfile.NamedTemporaryFile(delete=False, suffix='.mp4')
+    output_file.close()
+    out = cv2.VideoWriter(output_file.name, cv2.VideoWriter_fourcc(*'mp4v'), 30.0, (640, 480))
     
-    with open(temp_input, "wb") as f:
-        f.write(video_path.read())
-
-    cap = cv2.VideoCapture(temp_input)
-    fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-    fps = cap.get(cv2.CAP_PROP_FPS)
-    width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-    out = cv2.VideoWriter(temp_output, fourcc, fps, (width, height))
-
-    while cap.isOpened():
-        ret, frame = cap.read()
+    while True:
+        ret, frame = video.read()
         if not ret:
             break
+
+        # Convert to grayscale for face detection
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        faces = face_cascade.detectMultiScale(gray, 1.1, 4)
+
+        # Detect faces
+        faces = face_cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=5)
+
+        # Blur the faces
         for (x, y, w, h) in faces:
             face = frame[y:y+h, x:x+w]
             blurred_face = cv2.GaussianBlur(face, (99, 99), 30)
             frame[y:y+h, x:x+w] = blurred_face
+
+        # Write the processed frame to the output video
         out.write(frame)
 
-    cap.release()
+    # Release resources
+    video.release()
     out.release()
 
-    return temp_output
+    return output_file.name
 
-iface = gr.Interface(
-    fn=blur_faces_in_video,
-    inputs=gr.Video(label="Upload your video"),
-    outputs=gr.Video(label="Blurred video"),
-    title="Face Blur Tool",
-    description="Upload a video and this tool will blur all detected faces."
-)
+# Gradio interface
+def gradio_interface(input_video):
+    output_video = blur_faces(input_video)
+    return output_video
 
+iface = gr.Interface(fn=gradio_interface, 
+                     inputs=gr.inputs.File(label="Upload your video"),
+                     outputs=gr.outputs.File(label="Processed Video"))
 iface.launch()

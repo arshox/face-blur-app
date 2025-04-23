@@ -1,3 +1,4 @@
-gradio
+
+ffmpeg-python
 opencv-python
-moviepy
+gradio
